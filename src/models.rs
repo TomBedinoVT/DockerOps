@@ -1,0 +1,51 @@
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct Image {
+    pub id: i64,
+    pub name: String,
+    pub reference_count: i32,
+}
+
+
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct Stack {
+    pub id: i64,
+    pub name: String,
+    pub repository_url: String,
+    pub compose_path: String,
+    pub hash: String,
+    pub status: String, // "deployed", "stopped", "error"
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StackDefinition {
+    pub name: String,
+}
+
+impl Image {
+    pub fn new(name: String, reference_count: i32) -> Self {
+        Self {
+            id: 0, // Will be set by database
+            name,
+            reference_count,
+        }
+    }
+}
+
+
+
+impl Stack {
+    pub fn new(name: String, repository_url: String, compose_path: String, hash: String) -> Self {
+        Self {
+            id: 0, // Will be set by database
+            name,
+            repository_url,
+            compose_path,
+            hash,
+            status: "stopped".to_string(),
+        }
+    }
+} 

@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
+        default: 'v1.0.0'
+      release_notes:
+        description: 'Release notes'
+        required: false
+        type: string
+        default: 'Release'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build for Linux
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu
+          strip target/x86_64-unknown-linux-gnu/release/dockerops
+
+      - name: Create release assets
+        run: |
+          mkdir -p release
+          cp target/x86_64-unknown-linux-gnu/release/dockerops release/dockerops-linux-x86_64
+          
+          # Create checksum
+          cd release
+          sha256sum dockerops-linux-x86_64 > dockerops-linux-x86_64.sha256
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          release_name: DockerOps CLI ${{ github.event.inputs.version }}
+          body: |
+            ## DockerOps CLI ${{ github.event.inputs.version }}
+            
+            ${{ github.event.inputs.release_notes }}
+            
+            ### Downloads
+            
+            - **Linux (x86_64)**: [dockerops-linux-x86_64](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/dockerops-linux-x86_64)
+            
+            ### Installation
+            
+            ```bash
+            # Linux
+            chmod +x dockerops-linux-x86_64
+            sudo mv dockerops-linux-x86_64 /usr/local/bin/dockerops
+            ```
+            
+            ### Usage
+            
+            ```bash
+            # Watch a GitHub repository
+            dockerops watch "https://github.com/user/repo"
+            
+            # Reconcile database
+            dockerops reconcile
+            
+            # Stop application
+            dockerops stop
+            ```
+          draft: false
+          prerelease: false
+
+      - name: Upload Linux binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release/dockerops-linux-x86_64
+          asset_name: dockerops-linux-x86_64
+          asset_content_type: application/octet-stream
+
+      - name: Upload Linux checksum
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release/dockerops-linux-x86_64.sha256
+          asset_name: dockerops-linux-x86_64.sha256
+          asset_content_type: text/plain 
