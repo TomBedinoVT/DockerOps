@@ -1,5 +1,5 @@
 use sqlx::sqlite::SqlitePool;
-use crate::models::{Image, Stack};
+use crate::models::{Image, Stack, RepositoryCache};
 
 pub struct Database {
     pool: SqlitePool,
@@ -37,6 +37,18 @@ impl Database {
                 hash TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'stopped',
                 UNIQUE(name, repository_url)
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS repository_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL UNIQUE,
+                last_watch TEXT NOT NULL
             )
             "#,
         )
@@ -148,6 +160,58 @@ impl Database {
 
     pub async fn delete_all_stacks(&self) -> Result<(), sqlx::Error> {
         sqlx::query("DELETE FROM stacks")
+            .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    // Repository cache operations
+    pub async fn add_repository_to_cache(&self, url: &str) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT OR REPLACE INTO repository_cache (url, last_watch) VALUES (?, ?)"
+        )
+        .bind(url)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_repository_from_cache(&self, url: &str) -> Result<Option<RepositoryCache>, sqlx::Error> {
+        let row = sqlx::query_as::<_, RepositoryCache>(
+            "SELECT id, url, last_watch FROM repository_cache WHERE url = ?"
+        )
+        .bind(url)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn get_all_repositories(&self) -> Result<Vec<RepositoryCache>, sqlx::Error> {
+        let repositories = sqlx::query_as::<_, RepositoryCache>(
+            "SELECT id, url, last_watch FROM repository_cache ORDER BY last_watch DESC"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(repositories)
+    }
+
+    pub async fn delete_repository_from_cache(&self, url: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM repository_cache WHERE url = ?")
+            .bind(url)
+            .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn clear_repository_cache(&self) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM repository_cache")
             .execute(&self.pool)
         .await?;
 

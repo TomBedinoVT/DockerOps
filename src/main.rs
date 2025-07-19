@@ -24,6 +24,8 @@ enum Commands {
     Reconcile,
     /// Stop the application
     Stop,
+    /// Show version information
+    Version,
 }
 
 #[tokio::main]
@@ -48,6 +50,10 @@ async fn main() -> Result<()> {
             // Stop command doesn't need database
             let commands = commands::Commands::new(database::Database::new("sqlite:dockerops.db").await?);
             commands.stop().await?;
+        }
+        Commands::Version => {
+            // Version command doesn't need database
+            commands::Commands::show_version();
         }
     }
 

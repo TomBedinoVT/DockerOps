@@ -20,12 +20,22 @@ impl Commands {
     pub async fn watch(&self, github_url: &str) -> Result<()> {
         println!("Watching GitHub repository: {}", github_url);
         
+        // Check if repository is already in cache
+        if let Some(cached_repo) = self.db.get_repository_from_cache(github_url).await? {
+            return Err(anyhow::anyhow!("Repository '{}' is already being watched (last watch: {})", 
+                github_url, cached_repo.last_watch));
+        }
+        
         // Clone the repository
         let repo_path = self.clone_repository(github_url).await?;
         println!("Repository cloned to: {}", repo_path);
         
         // Process stacks and deploy them
         self.process_and_deploy_stacks(&repo_path, github_url, false).await?;
+        
+        // Add repository to cache
+        self.db.add_repository_to_cache(github_url).await?;
+        println!("Repository added to cache");
         
         // Clean up cloned repository
         if let Err(e) = fs::remove_dir_all(&repo_path) {
@@ -38,9 +48,20 @@ impl Commands {
     pub async fn reconcile(&self) -> Result<()> {
         println!("Reconciling database...");
         
+        // Check if there are any repositories in cache
+        let repositories = self.db.get_all_repositories().await?;
+        if repositories.is_empty() {
+            return Err(anyhow::anyhow!("No repositories found in cache. Please run 'watch' command first."));
+        }
+        
+        println!("Found {} repositories in cache:", repositories.len());
+        for repo in &repositories {
+            println!("  - {} (last watch: {})", repo.url, repo.last_watch);
+        }
+        
         // Get all stacks and display them
         let stacks = self.db.get_all_stacks().await?;
-        println!("Found {} stacks in database:", stacks.len());
+        println!("\nFound {} stacks in database:", stacks.len());
         
         for stack in &stacks {
             println!("  - {} (status: {}, hash: {})", stack.name, stack.status, stack.hash);
@@ -53,10 +74,6 @@ impl Commands {
         for image in &images {
             println!("  - {} (referenced {} times)", image.name, image.reference_count);
         }
-        
-        // For reconcile, we need to reprocess all repositories
-        // This would require storing repository URLs in the database
-        // For now, we'll just show the current state
         
         Ok(())
     }
@@ -89,10 +106,17 @@ impl Commands {
         self.db.delete_all_stacks().await?;
         self.db.reset_image_reference_counts().await?;
         self.db.delete_images_with_zero_count().await?;
+        self.db.clear_repository_cache().await?;
         
         println!("All stacks and images have been removed.");
         println!("Database connection will be closed.");
         Ok(())
+    }
+
+    pub fn show_version() {
+        println!("DockerOps CLI v{}", env!("CARGO_PKG_VERSION"));
+        println!("A Docker Swarm stack manager for GitHub repositories");
+        println!("Repository: https://github.com/your-username/dockerops");
     }
 
     async fn clone_repository(&self, github_url: &str) -> Result<String> {

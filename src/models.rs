@@ -20,6 +20,13 @@ pub struct Stack {
     pub status: String, // "deployed", "stopped", "error"
 }
 
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct RepositoryCache {
+    pub id: i64,
+    pub url: String,
+    pub last_watch: String, // ISO timestamp
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StackDefinition {
     pub name: String,
