@@ -62,7 +62,35 @@ impl Commands {
     }
 
     pub async fn stop(&self) -> Result<()> {
-        println!("Stopping DockerOps...");
+        println!("Stopping DockerOps and cleaning up all resources...");
+        
+        // Get all stacks from database
+        let stacks = self.db.get_all_stacks().await?;
+        println!("Found {} stacks to remove", stacks.len());
+        
+        // Remove all stacks
+        for stack in &stacks {
+            println!("Removing stack: {}", stack.name);
+            self.stop_stack(&stack.name).await?;
+        }
+        
+        // Get all images from database
+        let images = self.db.get_all_images().await?;
+        println!("Found {} images to remove", images.len());
+        
+        // Remove all images
+        for image in &images {
+            println!("Removing image: {}", image.name);
+            self.remove_image(&image.name).await?;
+        }
+        
+        // Clean up database
+        println!("Cleaning up database...");
+        self.db.delete_all_stacks().await?;
+        self.db.reset_image_reference_counts().await?;
+        self.db.delete_images_with_zero_count().await?;
+        
+        println!("All stacks and images have been removed.");
         println!("Database connection will be closed.");
         Ok(())
     }

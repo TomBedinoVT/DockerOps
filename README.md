@@ -6,7 +6,7 @@ Un outil CLI simple en Rust pour gérer les stacks Docker Swarm depuis des répe
 
 - **Watch** : Clone un répertoire GitHub, lit le fichier `stacks.yaml`, et déploie les stacks Docker Swarm
 - **Reconcile** : Affiche l'état actuel des stacks et images dans la base de données
-- **Stop** : Arrête l'application
+- **Stop** : Arrête l'application et supprime toutes les stacks et images
 
 ## Structure de la base de données
 
@@ -71,11 +71,17 @@ Cette commande affiche :
 - Toutes les stacks stockées avec leur statut et hash
 - Toutes les images stockées avec leur nombre de références
 
-### Stop - Arrêter l'application
+### Stop - Arrêter l'application et nettoyer
 
 ```bash
 ./dockerops stop
 ```
+
+Cette commande va :
+1. Supprimer toutes les stacks Docker Swarm
+2. Supprimer toutes les images Docker
+3. Nettoyer la base de données
+4. Arrêter l'application
 
 ## Structure du répertoire attendu
 
@@ -107,7 +113,7 @@ repository/
 # Vérifier l'état de la base de données
 ./dockerops reconcile
 
-# Arrêter l'application
+# Arrêter l'application et nettoyer toutes les ressources
 ./dockerops stop
 ```
 

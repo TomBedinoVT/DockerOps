@@ -146,6 +146,14 @@ impl Database {
         Ok(())
     }
 
+    pub async fn delete_all_stacks(&self) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM stacks")
+            .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     // Image management operations
     pub async fn reset_image_reference_counts(&self) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE images SET reference_count = 0")
