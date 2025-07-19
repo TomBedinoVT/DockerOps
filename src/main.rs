@@ -32,23 +32,39 @@ enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Get database path from environment or use default
+    let db_path = std::env::var("DOCKEROPS_DB_PATH")
+        .unwrap_or_else(|_| {
+            let home_dir = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_else(|_| ".".to_string());
+            format!("{}/.dockerops/dockerops.db", home_dir)
+        });
+
+    // Create .dockerops directory if it doesn't exist
+    if let Some(parent) = std::path::Path::new(&db_path).parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
+    let database_url = format!("sqlite:{}", db_path);
+
     // Only initialize database for commands that need it
     match &cli.command {
         Commands::Watch { url } => {
-            let database_url = "sqlite:dockerops.db";
-            let db = database::Database::new(database_url).await?;
+            let db = database::Database::new(&database_url).await?;
             let commands = commands::Commands::new(db);
             commands.watch(url).await?;
         }
         Commands::Reconcile => {
-            let database_url = "sqlite:dockerops.db";
-            let db = database::Database::new(database_url).await?;
+            let db = database::Database::new(&database_url).await?;
             let commands = commands::Commands::new(db);
             commands.reconcile().await?;
         }
         Commands::Stop => {
-            // Stop command doesn't need database
-            let commands = commands::Commands::new(database::Database::new("sqlite:dockerops.db").await?);
+            let db = database::Database::new(&database_url).await?;
+            let commands = commands::Commands::new(db);
             commands.stop().await?;
         }
         Commands::Version => {

@@ -43,6 +43,20 @@ cargo build --release
 # L'exécutable sera disponible dans target/release/dockerops
 ```
 
+### Configuration de la base de données
+
+Par défaut, la base de données SQLite est stockée dans `~/.dockerops/dockerops.db`.
+
+Vous pouvez personnaliser l'emplacement en définissant la variable d'environnement `DOCKEROPS_DB_PATH` :
+
+```bash
+# Utiliser un emplacement personnalisé
+export DOCKEROPS_DB_PATH="/var/lib/dockerops/dockerops.db"
+
+# Ou utiliser le répertoire par défaut
+unset DOCKEROPS_DB_PATH
+```
+
 ## Utilisation
 
 ### Surveiller un répertoire GitHub
@@ -166,7 +180,7 @@ L'application gère automatiquement les images Docker :
 
 ## Base de données
 
-L'application utilise SQLite avec le fichier `dockerops.db` créé automatiquement dans le répertoire courant.
+L'application utilise SQLite avec le fichier `dockerops.db` créé automatiquement dans `~/.dockerops/` par défaut, ou dans l'emplacement spécifié par `DOCKEROPS_DB_PATH`.
 
 ## Développement
 

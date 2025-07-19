@@ -6,6 +6,7 @@ Cargo.lock
 # Database files
 *.db
 *.db-*
+.dockerops/
 
 # Temporary directories
 temp_repo_*

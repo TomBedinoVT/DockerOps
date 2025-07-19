@@ -7,6 +7,15 @@ pub struct Database {
 
 impl Database {
     pub async fn new(database_url: &str) -> Result<Self, sqlx::Error> {
+        // Create database file if it doesn't exist
+        if database_url.starts_with("sqlite:") {
+            let db_path = database_url.trim_start_matches("sqlite:");
+            if !std::path::Path::new(db_path).exists() {
+                // Create empty database file
+                std::fs::File::create(db_path)?;
+            }
+        }
+        
         let pool = SqlitePool::connect(database_url).await?;
         Self::migrate(&pool).await?;
         Ok(Self { pool })
@@ -199,15 +208,6 @@ impl Database {
         .await?;
 
         Ok(repositories)
-    }
-
-    pub async fn delete_repository_from_cache(&self, url: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM repository_cache WHERE url = ?")
-            .bind(url)
-            .execute(&self.pool)
-        .await?;
-
-        Ok(())
     }
 
     pub async fn clear_repository_cache(&self) -> Result<(), sqlx::Error> {
