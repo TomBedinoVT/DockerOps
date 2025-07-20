@@ -662,7 +662,7 @@ impl Commands {
                     println!("  Processing volume: {} (type: volume, path: {})", 
                         volume_def.id, volume_def.path);
                     // For Docker volumes, we just need to ensure they exist
-                    self.ensure_docker_volume_exists(&volume_def.path).await?;
+                    //self.ensure_docker_volume_exists(&volume_def.path).await?;
                 }
                 VolumeType::Binding => {
                     println!("  Processing binding: {} (type: binding, path: {})", 
@@ -678,32 +678,6 @@ impl Commands {
         
         println!("  Finished processing all volume definitions");
         Ok(Some(volumes_definitions))
-    }
-
-    async fn ensure_docker_volume_exists(&self, volume_name: &str) -> Result<()> {
-        let output = Command::new("docker")
-            .args(&["volume", "ls", "-q", "-f", &format!("name=^{}$", volume_name)])
-            .output()?;
-        
-        let volume_exists = !String::from_utf8_lossy(&output.stdout).trim().is_empty();
-        
-        if !volume_exists {
-            println!("    Creating Docker volume: {}", volume_name);
-            let create_output = Command::new("docker")
-                .args(&["volume", "create", volume_name])
-                .output()?;
-            
-            if create_output.status.success() {
-                println!("    Successfully created Docker volume: {}", volume_name);
-            } else {
-                let error = String::from_utf8_lossy(&create_output.stderr);
-                return Err(anyhow::anyhow!("Failed to create Docker volume {}: {}", volume_name, error));
-            }
-        } else {
-            println!("    Docker volume already exists: {}", volume_name);
-        }
-        
-        Ok(())
     }
 
     async fn process_binding_volume(&self, volume_def: &mut VolumeDefinition, nfs_config: &NfsConfig, repo_path: &str) -> Result<()> {
@@ -858,6 +832,9 @@ impl Commands {
             println!("    No services section found in docker-compose");
         }
         
+        // Add volumes section to docker-compose if it doesn't exist
+        self.add_volumes_section(&mut yaml_value, volumes_definitions).await?;
+        
         // Convert back to string
         println!("    Converting modified YAML back to string...");
         let modified_content = serde_yaml::to_string(&yaml_value)?;
@@ -941,6 +918,47 @@ impl Commands {
         }
         
         println!("      Finished processing service volumes");
+        Ok(())
+    }
+
+    async fn add_volumes_section(&self, yaml_value: &mut serde_yaml::Value, volumes_definitions: &[VolumeDefinition]) -> Result<()> {
+        println!("    Adding volumes section to docker-compose...");
+        
+        // Create volumes section if it doesn't exist
+        if yaml_value.get("volumes").is_none() {
+            yaml_value["volumes"] = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+            println!("    Created new volumes section");
+        }
+        
+        let volumes_section = yaml_value.get_mut("volumes").unwrap();
+        
+        // Add each volume definition to the volumes section
+        for volume_def in volumes_definitions {
+            match volume_def.r#type {
+                VolumeType::Volume => {
+                    println!("    Adding volume '{}' to volumes section", volume_def.id);
+                    
+                    // Create volume configuration
+                    let mut volume_config = serde_yaml::Mapping::new();
+                    
+                    // For now, we'll use the default driver
+                    // In the future, we could add driver and driver_opts support
+                    volume_config.insert(
+                        serde_yaml::Value::String("driver".to_string()),
+                        serde_yaml::Value::String("local".to_string())
+                    );
+                    
+                    volumes_section[&volume_def.id] = serde_yaml::Value::Mapping(volume_config);
+                }
+                VolumeType::Binding => {
+                    // Bindings don't need to be in the volumes section
+                    // They are handled directly in the service volumes
+                    println!("    Skipping binding '{}' in volumes section (handled in service volumes)", volume_def.id);
+                }
+            }
+        }
+        
+        println!("    Volumes section updated");
         Ok(())
     }
 } 
