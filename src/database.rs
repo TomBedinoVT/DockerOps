@@ -190,12 +190,19 @@ impl Database {
     }
 
     pub async fn get_repository_from_cache(&self, url: &str) -> Result<Option<RepositoryCache>, sqlx::Error> {
+        println!("Debug: Querying cache for URL: {}", url);
+        
         let row = sqlx::query_as::<_, RepositoryCache>(
             "SELECT id, url, last_watch FROM repository_cache WHERE url = ?"
         )
         .bind(url)
         .fetch_optional(&self.pool)
         .await?;
+
+        match &row {
+            Some(repo) => println!("Debug: Found repository in database: {} (last watch: {})", repo.url, repo.last_watch),
+            None => println!("Debug: No repository found in database for URL: {}", url),
+        }
 
         Ok(row)
     }
