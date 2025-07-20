@@ -187,6 +187,7 @@ class DockerOpsManager:
         """Clean DockerOps database and directories"""
         print("🧹 Cleaning DockerOps database and directories...")
         
+        # Clean current user's home directory
         home_dir = self.get_user_home()
         dockerops_dir = home_dir / ".dockerops"
         
@@ -194,13 +195,23 @@ class DockerOpsManager:
             try:
                 shutil.rmtree(dockerops_dir)
                 print(f"✅ Removed {dockerops_dir}")
-                return True
             except Exception as e:
                 print(f"❌ Failed to remove {dockerops_dir}: {e}")
-                return False
         else:
-            print("ℹ️  No DockerOps directory found to clean")
-            return True
+            print("ℹ️  No DockerOps directory found in current user home")
+        
+        # Also clean root's home directory (when running with sudo)
+        root_dockerops_dir = Path("/root/.dockerops")
+        if root_dockerops_dir.exists():
+            try:
+                shutil.rmtree(root_dockerops_dir)
+                print(f"✅ Removed {root_dockerops_dir}")
+            except Exception as e:
+                print(f"❌ Failed to remove {root_dockerops_dir}: {e}")
+        else:
+            print("ℹ️  No DockerOps directory found in root home")
+        
+        return True
     
     def clean_systemd(self):
         """Remove systemd service files if they exist"""

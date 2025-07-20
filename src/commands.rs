@@ -19,22 +19,10 @@ impl Commands {
     pub async fn watch(&self, github_url: &str) -> Result<()> {
         println!("Watching GitHub repository: {}", github_url);
         
-        // Debug: Check cache status first
-        println!("Debug: Checking if repository is already in cache...");
-        let cache_result = self.db.get_repository_from_cache(github_url).await;
-        match &cache_result {
-            Ok(Some(cached_repo)) => {
-                println!("Debug: Found repository in cache: {} (last watch: {})", cached_repo.url, cached_repo.last_watch);
-                return Err(anyhow::anyhow!("Repository '{}' is already being watched (last watch: {})", 
-                    github_url, cached_repo.last_watch));
-            }
-            Ok(None) => {
-                println!("Debug: Repository not found in cache, proceeding...");
-            }
-            Err(e) => {
-                println!("Debug: Error checking cache: {}", e);
-                return Err(anyhow::anyhow!("Failed to check repository cache: {}", e));
-            }
+        // Check if repository is already in cache
+        if let Some(cached_repo) = self.db.get_repository_from_cache(github_url).await? {
+            return Err(anyhow::anyhow!("Repository '{}' is already being watched (last watch: {})", 
+                github_url, cached_repo.last_watch));
         }
         
         // Clone the repository

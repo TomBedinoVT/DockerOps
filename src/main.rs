@@ -32,6 +32,20 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Check if running as root
+    if std::env::var("USER").unwrap_or_default() != "root" {
+        eprintln!("❌ Error: DockerOps must be run with root privileges (use sudo)");
+        eprintln!("");
+        eprintln!("This is required because DockerOps needs to:");
+        eprintln!("  • Execute Docker commands");
+        eprintln!("  • Manage Docker Swarm stacks");
+        eprintln!("  • Pull and remove Docker images");
+        eprintln!("  • Access Docker daemon");
+        eprintln!("");
+        eprintln!("Please run: sudo dockerops <command>");
+        std::process::exit(1);
+    }
+
     let cli = Cli::parse();
 
     // Get database path from environment or use default
