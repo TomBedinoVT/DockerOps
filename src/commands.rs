@@ -260,7 +260,7 @@ impl Commands {
             
             // Write the modified compose content back to the file
             fs::write(&compose_path, &compose_content)?;
-            println!("  Updated docker-compose file with processed volumes");
+            println!("  Updated docker-compose file with processed volumes at {}", compose_path.to_string_lossy());
             
             let compose_hash = self.calculate_md5(&compose_content);
             
@@ -600,33 +600,44 @@ impl Commands {
     }
 
     async fn process_volumes_config(&self, repo_path: &str) -> Result<Option<Vec<VolumeDefinition>>> {
-        println!("Processing volumes configuration...");
+        println!("  Looking for volumes.yaml in: {}", repo_path);
         
         // Look for volumes.yaml file
         let volumes_file_path = Path::new(repo_path).join("volumes.yaml");
         if !volumes_file_path.exists() {
-            println!("No volumes.yaml found, skipping volume processing");
+            println!("  No volumes.yaml found at {}, skipping volume processing", volumes_file_path.display());
             return Ok(None);
         }
         
+        println!("  Found volumes.yaml at: {}", volumes_file_path.display());
+        
         // Read and parse volumes.yaml
         let volumes_content = fs::read_to_string(&volumes_file_path)?;
+        println!("  Read volumes.yaml content ({} characters)", volumes_content.len());
+        
         let volumes_definitions: Vec<VolumeDefinition> = serde_yaml::from_str(&volumes_content)?;
+        println!("  Parsed {} volume definitions from volumes.yaml", volumes_definitions.len());
         
         // Look for nfs.yaml file
         let nfs_file_path = Path::new(repo_path).join("nfs.yaml");
         let nfs_config = if nfs_file_path.exists() {
+            println!("  Found nfs.yaml at: {}", nfs_file_path.display());
             let nfs_content = fs::read_to_string(&nfs_file_path)?;
-            Some(serde_yaml::from_str::<NfsConfig>(&nfs_content)?)
+            let config = serde_yaml::from_str::<NfsConfig>(&nfs_content)?;
+            println!("  NFS config: {:?}", config);
+            Some(config)
         } else {
+            println!("  No nfs.yaml found at {}, NFS bindings will be skipped", nfs_file_path.display());
             None
         };
         
-        println!("Found {} volume definitions", volumes_definitions.len());
+        println!("  Processing {} volume definitions", volumes_definitions.len());
         
         let mut volumes_definitions = volumes_definitions;
         
         for volume_def in &mut volumes_definitions {
+            println!("  Processing volume definition: {:?}", volume_def);
+            
             match volume_def.r#type {
                 VolumeType::Volume => {
                     println!("  Processing volume: {} (type: volume, path: {})", 
@@ -646,6 +657,7 @@ impl Commands {
             }
         }
         
+        println!("  Finished processing all volume definitions");
         Ok(Some(volumes_definitions))
     }
 
@@ -793,67 +805,106 @@ impl Commands {
     }
 
     async fn process_compose_volumes(&self, compose_content: &str, volumes_definitions: &[VolumeDefinition]) -> Result<String> {
+        println!("    Parsing docker-compose content...");
+        
         // Parse the compose content to find volume references
         let mut yaml_value: serde_yaml::Value = serde_yaml::from_str(compose_content)?;
+        println!("    Successfully parsed YAML content");
         
         // Process services section
         if let Some(services) = yaml_value.get_mut("services") {
+            println!("    Found services section, processing {} services", 
+                services.as_mapping().map(|m| m.len()).unwrap_or(0));
+            
             if let Some(services_mapping) = services.as_mapping_mut() {
-                for (_, service) in services_mapping {
+                for (service_name, service) in services_mapping {
+                    let service_name_str = service_name.as_str().unwrap_or("unknown");
+                    println!("    Processing service: {}", service_name_str);
+                    
                     if let Some(volumes) = service.get_mut("volumes") {
+                        println!("    Found volumes section in service {}", service_name_str);
                         self.process_service_volumes(volumes, volumes_definitions).await?;
+                    } else {
+                        println!("    No volumes section found in service {}", service_name_str);
                     }
                 }
             }
+        } else {
+            println!("    No services section found in docker-compose");
         }
         
         // Convert back to string
+        println!("    Converting modified YAML back to string...");
         let modified_content = serde_yaml::to_string(&yaml_value)?;
+        println!("    Successfully converted YAML to string ({} characters)", modified_content.len());
+        
         Ok(modified_content)
     }
 
     async fn process_service_volumes(&self, volumes: &mut serde_yaml::Value, volumes_definitions: &[VolumeDefinition]) -> Result<()> {
+        println!("      Processing service volumes...");
+        
         match volumes {
             serde_yaml::Value::Sequence(seq) => {
-                for volume in seq {
+                println!("      Found {} volume entries", seq.len());
+                
+                for (index, volume) in seq.iter_mut().enumerate() {
+                    println!("      Processing volume entry {}: {:?}", index, volume);
+                    
                     if let Some(volume_str) = volume.as_str() {
+                        println!("      Volume string: '{}'", volume_str);
+                        
                         // Check if this is a volume reference (format: volume_id:container_path)
                         if volume_str.contains(':') {
                             let parts: Vec<&str> = volume_str.split(':').collect();
+                            println!("      Split into {} parts: {:?}", parts.len(), parts);
+                            
                             if parts.len() == 2 {
                                 let volume_id = parts[0];
                                 let container_path = parts[1];
+                                println!("      Volume ID: '{}', Container path: '{}'", volume_id, container_path);
                                 
                                 // Find the volume definition
                                 if let Some(volume_def) = volumes_definitions.iter().find(|v| v.id == volume_id) {
+                                    println!("      Found volume definition: {:?}", volume_def);
+                                    
                                     match volume_def.r#type {
                                         VolumeType::Volume => {
                                             // For Docker volumes, use the path as volume name
                                             let volume_path = format!("{}:{}", volume_def.path, container_path);
-                                            println!("    Replacing Docker volume {} with: {}", volume_id, volume_path);
+                                            println!("      Replacing Docker volume {} with: {}", volume_id, volume_path);
                                             *volume = serde_yaml::Value::String(volume_path);
                                         }
                                         VolumeType::Binding => {
                                             // For bindings, replace with NFS path
                                             // The path in volume_def.path is the NFS path after processing
                                             let nfs_path = format!("{}:{}", volume_def.path, container_path);
-                                            println!("    Replacing binding volume {} with NFS path: {}", volume_id, nfs_path);
+                                            println!("      Replacing binding volume {} with NFS path: {}", volume_id, nfs_path);
                                             *volume = serde_yaml::Value::String(nfs_path);
                                         }
                                     }
                                 } else {
-                                    println!("    Warning: Volume definition not found for ID: {}", volume_id);
+                                    println!("      Warning: Volume definition not found for ID: '{}'", volume_id);
+                                    println!("      Available volume definitions: {:?}", 
+                                        volumes_definitions.iter().map(|v| &v.id).collect::<Vec<_>>());
                                 }
+                            } else {
+                                println!("      Volume string does not have exactly 2 parts, skipping");
                             }
+                        } else {
+                            println!("      Volume string does not contain ':', skipping");
                         }
+                    } else {
+                        println!("      Volume entry is not a string, skipping");
                     }
                 }
             }
             _ => {
-                // Handle other volume formats if needed
+                println!("      Volume format is not a sequence, skipping");
             }
         }
         
+        println!("      Finished processing service volumes");
         Ok(())
     }
 } 
