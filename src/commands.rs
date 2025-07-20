@@ -273,7 +273,8 @@ impl Commands {
             // Process volumes in compose file if volumes definitions exist
             if let Some(ref volumes_defs) = volumes_definitions {
                 println!("  Processing volumes in docker-compose file...");
-                compose_content = self.process_compose_volumes(&compose_content, volumes_defs).await?;
+                let nfs_config = self.read_nfs_config(repo_path).await?;
+                compose_content = self.process_compose_volumes(&compose_content, volumes_defs, &nfs_config).await?;
                 println!("  Volume processing completed");
             }
             
@@ -896,7 +897,7 @@ impl Commands {
         Ok(())
     }
 
-    async fn process_compose_volumes(&self, compose_content: &str, volumes_definitions: &[VolumeDefinition]) -> Result<String> {
+    async fn process_compose_volumes(&self, compose_content: &str, volumes_definitions: &[VolumeDefinition], nfs_config: &NfsConfig) -> Result<String> {
         println!("    Parsing docker-compose content...");
         
         // Parse the compose content to find volume references
@@ -915,7 +916,7 @@ impl Commands {
                     
                     if let Some(volumes) = service.get_mut("volumes") {
                         println!("    Found volumes section in service {}", service_name_str);
-                        self.process_service_volumes(volumes, volumes_definitions).await?;
+                        self.process_service_volumes(volumes, volumes_definitions, nfs_config).await?;
                     } else {
                         println!("    No volumes section found in service {}", service_name_str);
                     }
@@ -936,7 +937,7 @@ impl Commands {
         Ok(modified_content)
     }
 
-    async fn process_service_volumes(&self, volumes: &mut serde_yaml::Value, volumes_definitions: &[VolumeDefinition]) -> Result<()> {
+    async fn process_service_volumes(&self, volumes: &mut serde_yaml::Value, volumes_definitions: &[VolumeDefinition], nfs_config: &NfsConfig) -> Result<()> {
         println!("      Processing service volumes...");
         
         match volumes {
@@ -979,11 +980,15 @@ impl Commands {
                                         }
                                         VolumeType::Binding => {
                                             // For bindings, replace with NFS path
-                                            // The path in volume_def.path is the NFS path after processing
+                                            // Construct the NFS path: nfs_config.path + volume_def.path
+                                            let full_nfs_path = Path::new(&nfs_config.path).join(&volume_def.path);
+                                            println!("      NFS config path: {}", nfs_config.path);
+                                            println!("      Volume path: {}", volume_def.path);
+                                            println!("      Full NFS path: {}", full_nfs_path.display());
                                             let nfs_path = if !options.is_empty() {
-                                                format!("{}:{}:{}", volume_def.path, container_path, options)
+                                                format!("{}:{}:{}", full_nfs_path.display(), container_path, options)
                                             } else {
-                                                format!("{}:{}", volume_def.path, container_path)
+                                                format!("{}:{}", full_nfs_path.display(), container_path)
                                             };
                                             println!("      Replacing binding volume {} with NFS path: {}", volume_id, nfs_path);
                                             *volume = serde_yaml::Value::String(nfs_path);
