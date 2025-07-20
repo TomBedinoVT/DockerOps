@@ -782,7 +782,7 @@ impl Commands {
         }
         
         // Create NFS destination path
-        let nfs_dest_path = Path::new(&nfs_config.path).join(&volume_def.id);
+        let nfs_dest_path = Path::new(&nfs_config.path).join(&volume_def.path);
         
         println!("    Copying {} to NFS: {}", local_path.display(), nfs_dest_path.display());
         
