@@ -2,7 +2,6 @@ use anyhow::Result;
 use std::path::Path;
 use std::fs;
 use std::process::Command;
-use git2::Repository;
 use serde_yaml::Value;
 
 use crate::database::Database;
@@ -116,7 +115,7 @@ impl Commands {
     pub fn show_version() {
         println!("DockerOps CLI v{}", env!("CARGO_PKG_VERSION"));
         println!("A Docker Swarm stack manager for GitHub repositories");
-        println!("Repository: https://github.com/your-username/dockerops");
+        println!("Repository: https://github.com/TomBedinoVT/DockerOps");
     }
 
     async fn clone_repository(&self, github_url: &str) -> Result<String> {
@@ -135,8 +134,31 @@ impl Commands {
         
         println!("Cloning repository from: {}", clone_url);
         
-        // Clone the repository
-        let _repo = Repository::clone(&clone_url, repo_path)
+        // Check for GitHub token in environment
+        let github_token = std::env::var("GITHUB_TOKEN").ok();
+        
+        // Clone the repository with authentication if token is available
+        let mut callbacks = git2::RemoteCallbacks::new();
+        
+        if let Some(token) = github_token {
+            println!("Using GitHub token for authentication");
+            // Move token into the closure to ensure it lives long enough
+            let token_clone = token.clone();
+            callbacks.credentials(move |_url, username_from_url, _allowed_types| {
+                git2::Cred::userpass_plaintext(username_from_url.unwrap_or("git"), &token_clone)
+            });
+        } else {
+            println!("No GitHub token found. Trying to clone without authentication...");
+            println!("If this fails, set the GITHUB_TOKEN environment variable");
+        }
+        
+        let mut fetch_options = git2::FetchOptions::new();
+        fetch_options.remote_callbacks(callbacks);
+        
+        let mut builder = git2::build::RepoBuilder::new();
+        builder.fetch_options(fetch_options);
+        
+        let _repo = builder.clone(&clone_url, repo_path)
             .map_err(|e| anyhow::anyhow!("Failed to clone repository: {}", e))?;
         
         Ok(temp_dir)
