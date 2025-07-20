@@ -159,8 +159,8 @@ impl Commands {
             github_url.to_string()
         };
         
-        // Create temporary directory for cloning
-        let temp_dir = format!("temp_repo_{}", chrono::Utc::now().timestamp());
+        // Create temporary directory for cloning in /tmp
+        let temp_dir = format!("/tmp/temp_repo_{}", chrono::Utc::now().timestamp());
         let repo_path = Path::new(&temp_dir);
         
         println!("Cloning repository from: {}", clone_url);
@@ -253,7 +253,9 @@ impl Commands {
             
             // Process volumes in compose file if volumes definitions exist
             if let Some(ref volumes_defs) = volumes_definitions {
+                println!("  Processing volumes in docker-compose file...");
                 compose_content = self.process_compose_volumes(&compose_content, volumes_defs).await?;
+                println!("  Volume processing completed");
             }
             
             let compose_hash = self.calculate_md5(&compose_content);
@@ -398,7 +400,7 @@ impl Commands {
         println!("    Deploying stack '{}' with docker stack deploy", stack_name);
         
         let output = Command::new("docker")
-            .args(&["stack", "deploy", "-c", compose_path.to_str().unwrap(), stack_name])
+            .args(&["stack", "deploy", "--detach=false", "-c", compose_path.to_str().unwrap(), stack_name])
             .output()?;
         
         if output.status.success() {
@@ -774,12 +776,14 @@ impl Commands {
                                         VolumeType::Volume => {
                                             // For Docker volumes, use the path as volume name
                                             let volume_path = format!("{}:{}", volume_def.path, container_path);
+                                            println!("    Replacing Docker volume {} with: {}", volume_id, volume_path);
                                             *volume = serde_yaml::Value::String(volume_path);
                                         }
                                         VolumeType::Binding => {
                                             // For bindings, replace with NFS path
                                             // The path in volume_def.path is the NFS path after processing
                                             let nfs_path = format!("{}:{}", volume_def.path, container_path);
+                                            println!("    Replacing binding volume {} with NFS path: {}", volume_id, nfs_path);
                                             *volume = serde_yaml::Value::String(nfs_path);
                                         }
                                     }

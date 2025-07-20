@@ -1,29 +1,10 @@
 version: '3.8'
 
 services:
-  web:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - "config_files:/etc/nginx/conf.d"
-      - "static_files:/usr/share/nginx/html"
-      - "logs:/var/log/nginx"
-
   app:
-    image: myapp:latest
-    depends_on:
-      - database
+    image: nginx:alpine
     volumes:
-      - "app_data:/app/data"
-      - "config_files:/app/config"
-      - "logs:/app/logs"
-
-  database:
-    image: postgres:13
-    environment:
-      POSTGRES_DB: myapp
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-    volumes:
-      - "database_data:/var/lib/postgresql/data" 
+      - "app-config:/etc/nginx/conf.d"
+      - "app-data:/var/www/html"
+    ports:
+      - "8080:80" 

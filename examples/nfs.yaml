@@ -1,4 +1,1 @@
-# nfs.yaml - Configuration NFS pour DockerOps
-# Ce fichier définit le chemin NFS pour les volumes de type binding
-
 path: "/mnt/nfs/dockerops" 
