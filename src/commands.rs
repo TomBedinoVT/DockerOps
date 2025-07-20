@@ -865,10 +865,13 @@ impl Commands {
                             let parts: Vec<&str> = volume_str.split(':').collect();
                             println!("      Split into {} parts: {:?}", parts.len(), parts);
                             
-                            if parts.len() == 2 {
+                            if parts.len() >= 2 && parts.len() <= 3 {
                                 let volume_id = parts[0];
                                 let container_path = parts[1];
-                                println!("      Volume ID: '{}', Container path: '{}'", volume_id, container_path);
+                                let options = if parts.len() == 3 { parts[2] } else { "" };
+                                
+                                println!("      Volume ID: '{}', Container path: '{}', Options: '{}'", 
+                                    volume_id, container_path, options);
                                 
                                 // Find the volume definition
                                 if let Some(volume_def) = volumes_definitions.iter().find(|v| v.id == volume_id) {
@@ -877,14 +880,22 @@ impl Commands {
                                     match volume_def.r#type {
                                         VolumeType::Volume => {
                                             // For Docker volumes, use the path as volume name
-                                            let volume_path = format!("{}:{}", volume_def.path, container_path);
+                                            let volume_path = if !options.is_empty() {
+                                                format!("{}:{}:{}", volume_def.path, container_path, options)
+                                            } else {
+                                                format!("{}:{}", volume_def.path, container_path)
+                                            };
                                             println!("      Replacing Docker volume {} with: {}", volume_id, volume_path);
                                             *volume = serde_yaml::Value::String(volume_path);
                                         }
                                         VolumeType::Binding => {
                                             // For bindings, replace with NFS path
                                             // The path in volume_def.path is the NFS path after processing
-                                            let nfs_path = format!("{}:{}", volume_def.path, container_path);
+                                            let nfs_path = if !options.is_empty() {
+                                                format!("{}:{}:{}", volume_def.path, container_path, options)
+                                            } else {
+                                                format!("{}:{}", volume_def.path, container_path)
+                                            };
                                             println!("      Replacing binding volume {} with NFS path: {}", volume_id, nfs_path);
                                             *volume = serde_yaml::Value::String(nfs_path);
                                         }
@@ -895,7 +906,7 @@ impl Commands {
                                         volumes_definitions.iter().map(|v| &v.id).collect::<Vec<_>>());
                                 }
                             } else {
-                                println!("      Volume string does not have exactly 2 parts, skipping");
+                                println!("      Volume string does not have 2 or 3 parts, skipping");
                             }
                         } else {
                             println!("      Volume string does not contain ':', skipping");
