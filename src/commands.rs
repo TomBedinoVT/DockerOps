@@ -258,6 +258,10 @@ impl Commands {
                 println!("  Volume processing completed");
             }
             
+            // Write the modified compose content back to the file
+            fs::write(&compose_path, &compose_content)?;
+            println!("  Updated docker-compose file with processed volumes");
+            
             let compose_hash = self.calculate_md5(&compose_content);
             
             // Calculate relative path for database
@@ -706,6 +710,9 @@ impl Commands {
             fs::copy(&local_path, &nfs_dest_path)?;
         }
         
+        // Fix permissions for Docker compatibility
+        self.fix_permissions_recursive(&nfs_dest_path).await?;
+        
         // Update the volume definition path to point to NFS
         volume_def.path = nfs_dest_path.to_string_lossy().to_string();
         
@@ -733,6 +740,53 @@ impl Commands {
             } else {
                 fs::copy(&src_path, &dst_path)?;
             }
+        }
+        
+        Ok(())
+    }
+
+    async fn fix_permissions_recursive(&self, path: &Path) -> Result<()> {
+        println!("    Fixing permissions for Docker compatibility...");
+        
+        // Use chmod command to set appropriate permissions
+        let output = Command::new("chmod")
+            .args(&["-R", "755", path.to_str().unwrap()])
+            .output()?;
+        
+        if output.status.success() {
+            println!("    Successfully set directory permissions to 755");
+        } else {
+            let error = String::from_utf8_lossy(&output.stderr);
+            println!("    Warning: Failed to set directory permissions: {}", error);
+        }
+        
+        // For files, set 644 permissions (readable by all, writable by owner)
+        let output = Command::new("find")
+            .args(&[path.to_str().unwrap(), "-type", "f", "-exec", "chmod", "644", "{}", ";"])
+            .output()?;
+        
+        if output.status.success() {
+            println!("    Successfully set file permissions to 644");
+        } else {
+            let error = String::from_utf8_lossy(&output.stderr);
+            println!("    Warning: Failed to set file permissions: {}", error);
+        }
+        
+        // Change ownership to a more Docker-friendly user/group if possible
+        // Try to use the current user or a common Docker user
+        let current_user = std::env::var("SUDO_USER").ok()
+            .or_else(|| std::env::var("USER").ok())
+            .unwrap_or_else(|| "1000".to_string());
+        
+        let output = Command::new("chown")
+            .args(&["-R", &format!("{}:{}", current_user, current_user), path.to_str().unwrap()])
+            .output()?;
+        
+        if output.status.success() {
+            println!("    Successfully changed ownership to {}", current_user);
+        } else {
+            let error = String::from_utf8_lossy(&output.stderr);
+            println!("    Warning: Failed to change ownership: {}", error);
         }
         
         Ok(())
