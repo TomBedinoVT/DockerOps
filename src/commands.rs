@@ -985,6 +985,16 @@ impl Commands {
                                             println!("      NFS config path: {}", nfs_config.path);
                                             println!("      Volume path: {}", volume_def.path);
                                             println!("      Full NFS path: {}", full_nfs_path.display());
+                                            
+                                            // Create the NFS directory if it doesn't exist
+                                            if !full_nfs_path.exists() {
+                                                println!("      Creating NFS directory: {}", full_nfs_path.display());
+                                                fs::create_dir_all(&full_nfs_path)?;
+                                                println!("      Successfully created NFS directory");
+                                            } else {
+                                                println!("      NFS directory already exists: {}", full_nfs_path.display());
+                                            }
+                                            
                                             let nfs_path = if !options.is_empty() {
                                                 format!("{}:{}:{}", full_nfs_path.display(), container_path, options)
                                             } else {
