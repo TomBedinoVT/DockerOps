@@ -74,6 +74,25 @@ impl Commands {
             println!("  - {} (referenced {} times)", image.name, image.reference_count);
         }
         
+        // Now reconcile each repository
+        println!("\nStarting reconciliation process...");
+        for repo in &repositories {
+            println!("Reconciling repository: {}", repo.url);
+            
+            // Clone the repository
+            let repo_path = self.clone_repository(&repo.url).await?;
+            println!("Repository cloned to: {}", repo_path);
+            
+            // Process stacks and deploy them (with is_reconcile=true)
+            self.process_and_deploy_stacks(&repo_path, &repo.url, true).await?;
+            
+            // Clean up cloned repository
+            if let Err(e) = fs::remove_dir_all(&repo_path) {
+                println!("Warning: Could not clean up repository directory: {}", e);
+            }
+        }
+        
+        println!("Reconciliation completed!");
         Ok(())
     }
 
