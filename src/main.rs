@@ -26,6 +26,8 @@ enum Commands {
     Stop,
     /// Show version information
     Version,
+    /// Debug repository cache
+    DebugCache,
 }
 
 #[tokio::main]
@@ -70,6 +72,11 @@ async fn main() -> Result<()> {
         Commands::Version => {
             // Version command doesn't need database
             commands::Commands::show_version();
+        }
+        Commands::DebugCache => {
+            let db = database::Database::new(&database_url).await?;
+            let commands = commands::Commands::new(db);
+            commands.debug_cache().await?;
         }
     }
 

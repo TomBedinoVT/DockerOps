@@ -107,6 +107,13 @@ impl Commands {
         self.db.delete_images_with_zero_count().await?;
         self.db.clear_repository_cache().await?;
         
+        // Verify cache is cleared
+        let repositories = self.db.get_all_repositories().await?;
+        if !repositories.is_empty() {
+            println!("Warning: Repository cache still contains {} entries, forcing cleanup...", repositories.len());
+            self.db.clear_repository_cache().await?;
+        }
+        
         println!("All stacks and images have been removed.");
         println!("Database connection will be closed.");
         Ok(())
@@ -116,6 +123,27 @@ impl Commands {
         println!("DockerOps CLI v{}", env!("CARGO_PKG_VERSION"));
         println!("A Docker Swarm stack manager for GitHub repositories");
         println!("Repository: https://github.com/TomBedinoVT/DockerOps");
+    }
+
+    pub async fn debug_cache(&self) -> Result<()> {
+        println!("Debug: Checking repository cache...");
+        
+        let repositories = self.db.get_all_repositories().await?;
+        println!("Found {} repositories in cache:", repositories.len());
+        
+        for repo in &repositories {
+            println!("  - {} (last watch: {})", repo.url, repo.last_watch);
+        }
+        
+        // Test specific URL
+        let test_url = "https://github.com/TomBedinoVT/infra-backbone.git";
+        if let Some(cached_repo) = self.db.get_repository_from_cache(test_url).await? {
+            println!("  Found in cache: {} (last watch: {})", cached_repo.url, cached_repo.last_watch);
+        } else {
+            println!("  Not found in cache: {}", test_url);
+        }
+        
+        Ok(())
     }
 
     async fn clone_repository(&self, github_url: &str) -> Result<String> {
