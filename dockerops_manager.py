@@ -121,10 +121,13 @@ class DockerOpsManager:
         print(f"📦 Extracting {archive_path}...")
         
         try:
-            if archive_path.endswith('.zip'):
+            # Convert Path to string for endswith check
+            archive_str = str(archive_path)
+            
+            if archive_str.endswith('.zip'):
                 with zipfile.ZipFile(archive_path, 'r') as zip_ref:
                     zip_ref.extractall(extract_to)
-            elif archive_path.endswith('.tar.gz'):
+            elif archive_str.endswith('.tar.gz'):
                 with tarfile.open(archive_path, 'r:gz') as tar_ref:
                     tar_ref.extractall(extract_to)
             else:
