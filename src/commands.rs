@@ -700,10 +700,16 @@ impl Commands {
         
         println!("    Copying {} to NFS: {}", local_path.display(), nfs_dest_path.display());
         
-        // Remove existing directory on NFS if it exists
+        // Remove existing file or directory on NFS if it exists
         if nfs_dest_path.exists() {
-            println!("    Removing existing directory on NFS: {}", nfs_dest_path.display());
-            fs::remove_dir_all(&nfs_dest_path)?;
+            let metadata = fs::metadata(&nfs_dest_path)?;
+            if metadata.is_dir() {
+                println!("    Removing existing directory on NFS: {}", nfs_dest_path.display());
+                fs::remove_dir_all(&nfs_dest_path)?;
+            } else {
+                println!("    Removing existing file on NFS: {}", nfs_dest_path.display());
+                fs::remove_file(&nfs_dest_path)?;
+            }
         }
         
         // Create parent directory if it doesn't exist
