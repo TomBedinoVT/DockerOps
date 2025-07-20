@@ -347,22 +347,28 @@ class DockerOpsManager:
             self.clean_temp_files()
             sys.exit(1)
         
-        # Extract archive
-        if not self.extract_archive(download_path, self.temp_dir):
-            self.clean_temp_files()
-            sys.exit(1)
-        
-        # Find the binary in extracted files
-        binary_found = None
-        for file_path in self.temp_dir.rglob("*"):
-            if file_path.is_file() and file_path.name == BINARY_NAME:
-                binary_found = file_path
-                break
-        
-        if not binary_found:
-            print(f"❌ Could not find {BINARY_NAME} in extracted files")
-            self.clean_temp_files()
-            sys.exit(1)
+        # Check if downloaded file is already the binary or needs extraction
+        if download_path.name == BINARY_NAME:
+            # Direct binary download, no extraction needed
+            print(f"📦 Downloaded file is already the binary: {download_path}")
+            binary_found = download_path
+        else:
+            # Try to extract archive
+            if not self.extract_archive(download_path, self.temp_dir):
+                self.clean_temp_files()
+                sys.exit(1)
+            
+            # Find the binary in extracted files
+            binary_found = None
+            for file_path in self.temp_dir.rglob("*"):
+                if file_path.is_file() and file_path.name == BINARY_NAME:
+                    binary_found = file_path
+                    break
+            
+            if not binary_found:
+                print(f"❌ Could not find {BINARY_NAME} in extracted files")
+                self.clean_temp_files()
+                sys.exit(1)
         
         # Backup existing installation
         self.backup_existing()

@@ -101,11 +101,9 @@ main() {
     # Check prerequisites
     check_prerequisites "$1"
     
-    # Download manager script if it doesn't exist
-    if [[ ! -f "$MANAGER_SCRIPT" ]]; then
-        if ! download_manager; then
-            exit 1
-        fi
+    # Always download the latest manager script
+    if ! download_manager; then
+        exit 1
     fi
     
     # Run the manager script
