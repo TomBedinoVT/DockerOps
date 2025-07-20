@@ -112,6 +112,17 @@ impl Commands {
         if !repositories.is_empty() {
             println!("Warning: Repository cache still contains {} entries, forcing cleanup...", repositories.len());
             self.db.clear_repository_cache().await?;
+            
+            // Verify again after forced cleanup
+            let repositories_after = self.db.get_all_repositories().await?;
+            if !repositories_after.is_empty() {
+                println!("❌ Cache cleanup failed! Still contains {} entries", repositories_after.len());
+                for repo in &repositories_after {
+                    println!("  - {}", repo.url);
+                }
+            } else {
+                println!("✅ Cache successfully cleared");
+            }
         }
         
         println!("All stacks and images have been removed.");
@@ -133,14 +144,6 @@ impl Commands {
         
         for repo in &repositories {
             println!("  - {} (last watch: {})", repo.url, repo.last_watch);
-        }
-        
-        // Test specific URL
-        let test_url = "https://github.com/TomBedinoVT/infra-backbone.git";
-        if let Some(cached_repo) = self.db.get_repository_from_cache(test_url).await? {
-            println!("  Found in cache: {} (last watch: {})", cached_repo.url, cached_repo.last_watch);
-        } else {
-            println!("  Not found in cache: {}", test_url);
         }
         
         Ok(())

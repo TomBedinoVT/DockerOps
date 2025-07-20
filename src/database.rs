@@ -211,9 +211,15 @@ impl Database {
     }
 
     pub async fn clear_repository_cache(&self) -> Result<(), sqlx::Error> {
+        // Use a transaction to ensure the deletion is committed
+        let mut tx = self.pool.begin().await?;
+        
         sqlx::query("DELETE FROM repository_cache")
-            .execute(&self.pool)
-        .await?;
+            .execute(&mut *tx)
+            .await?;
+        
+        // Commit the transaction
+        tx.commit().await?;
 
         Ok(())
     }
