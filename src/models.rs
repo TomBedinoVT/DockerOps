@@ -51,6 +51,12 @@ pub struct NfsConfig {
     pub path: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SecretDefinition {
+    pub id: String,
+    pub env: String,
+}
+
 impl Image {
     pub fn new(name: String, reference_count: i32) -> Self {
         Self {

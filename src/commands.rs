@@ -5,7 +5,7 @@ use std::process::Command;
 use serde_yaml::Value;
 
 use crate::database::Database;
-use crate::models::{Image, Stack, StackDefinition, VolumeDefinition, VolumeType, NfsConfig};
+use crate::models::{Image, Stack, StackDefinition, VolumeDefinition, VolumeType, NfsConfig, SecretDefinition};
 
 pub struct Commands {
     db: Database,
@@ -277,6 +277,11 @@ impl Commands {
                 println!("  Volume processing completed");
             }
             
+            // Process secrets
+            println!("  Processing secrets...");
+            let secrets_env_vars = self.process_compose_secrets(&stack_dir, repo_path).await?;
+            println!("  Secret processing completed");
+            
             // Write the modified compose content back to the file
             fs::write(&compose_path, &compose_content)?;
             println!("  Updated docker-compose file with processed volumes at {}", compose_path.to_string_lossy());
@@ -307,7 +312,7 @@ impl Commands {
                     
                     // Deploy the updated stack
                     println!("  Deploying updated stack '{}'", stack_def.name);
-                    self.deploy_stack(&stack_def.name, &compose_path).await?;
+                    self.deploy_stack(&stack_def.name, &compose_path, &secrets_env_vars).await?;
                     self.db.update_stack_status(&stack_def.name, repository_url, "deployed").await?;
                 } else {
                     println!("  Stack '{}' unchanged", stack_def.name);
@@ -324,7 +329,7 @@ impl Commands {
                 self.db.create_stack(&stack).await?;
                 
                 // Deploy the new stack
-                self.deploy_stack(&stack_def.name, &compose_path).await?;
+                self.deploy_stack(&stack_def.name, &compose_path, &secrets_env_vars).await?;
                 self.db.update_stack_status(&stack_def.name, repository_url, "deployed").await?;
             }
             
@@ -419,12 +424,40 @@ impl Commands {
         Ok(())
     }
 
-    async fn deploy_stack(&self, stack_name: &str, compose_path: &Path) -> Result<()> {
+    async fn deploy_stack(&self, stack_name: &str, compose_path: &Path, secrets_env_vars: &[(String, String)]) -> Result<()> {
         println!("    Deploying stack '{}' with docker stack deploy", stack_name);
         
-        let output = Command::new("docker")
-            .args(&["stack", "deploy", "--detach=false", "-c", compose_path.to_str().unwrap(), stack_name])
-            .output()?;
+        // Read compose file to extract images
+        let compose_content = fs::read_to_string(compose_path)?;
+        
+        // Extract and pull images before deployment
+        println!("    Extracting images from compose file...");
+        let yaml_value: Value = serde_yaml::from_str(&compose_content)?;
+        let mut images_found = Vec::new();
+        self.extract_images_from_yaml(&yaml_value, &mut images_found);
+        
+        if !images_found.is_empty() {
+            println!("    Found {} images, pulling before deployment: {:?}", images_found.len(), images_found);
+            for image_name in &images_found {
+                println!("    Pulling image: {}", image_name);
+                self.pull_image(image_name).await?;
+            }
+            println!("    All images pulled successfully");
+        } else {
+            println!("    No images found in compose file");
+        }
+        
+        // Now deploy the stack with secrets as environment variables
+        let mut command = Command::new("docker");
+        command.args(&["stack", "deploy", "--detach=false", "-c", compose_path.to_str().unwrap(), stack_name]);
+        
+        // Add secrets as environment variables
+        for (env_name, env_value) in secrets_env_vars {
+            command.env(env_name, env_value);
+            println!("    Added environment variable: {} (secret)", env_name);
+        }
+        
+        let output = command.output()?;
         
         if output.status.success() {
             println!("    Successfully deployed stack '{}'", stack_name);
@@ -616,6 +649,66 @@ impl Commands {
         }
         
         Ok(())
+    }
+
+    async fn process_compose_secrets(&self, stack_dir: &Path, repo_path: &str) -> Result<Vec<(String, String)>> {
+        println!("    Checking for secrets.yaml file...");
+        
+        // Read secrets.yaml file if it exists
+        let secrets_file_path = stack_dir.join("secrets.yaml");
+        if !secrets_file_path.exists() {
+            println!("    No secrets.yaml file found, skipping secret processing");
+            return Ok(Vec::new());
+        }
+        
+        println!("    Found secrets.yaml file, reading secrets...");
+        let secrets_content = fs::read_to_string(&secrets_file_path)?;
+        let secrets_definitions: Vec<SecretDefinition> = serde_yaml::from_str(&secrets_content)?;
+        println!("    Found {} secret definitions", secrets_definitions.len());
+        
+        // Read NFS configuration to get the secrets path
+        let nfs_config = self.read_nfs_config(repo_path).await?;
+        let secrets_base_path = Path::new(&nfs_config.path).join("secret");
+        println!("    Using secrets path: {}", secrets_base_path.display());
+        
+        let mut env_vars = Vec::new();
+        
+        // Process each secret definition
+        for secret_def in &secrets_definitions {
+            println!("    Processing secret: {} -> {}", secret_def.id, secret_def.env);
+            
+            // Read secret value from NFS secrets directory
+            let secret_path = secrets_base_path.join(&secret_def.id);
+            if !secret_path.exists() {
+                return Err(anyhow::anyhow!("Secret file not found: {}", secret_path.display()));
+            }
+            
+            let secret_value = fs::read_to_string(&secret_path)?;
+            let secret_value = secret_value.trim(); // Remove trailing whitespace/newlines
+            
+            println!("    Secret value loaded from: {}", secret_path.display());
+            
+            // Add to environment variables list
+            env_vars.push((secret_def.env.clone(), secret_value.to_string()));
+        }
+        
+        println!("    Successfully loaded {} secrets", env_vars.len());
+        Ok(env_vars)
+    }
+
+    async fn read_nfs_config(&self, repo_path: &str) -> Result<NfsConfig> {
+        // Look for nfs.yaml file
+        let nfs_file_path = Path::new(repo_path).join("nfs.yaml");
+        if !nfs_file_path.exists() {
+            return Err(anyhow::anyhow!("nfs.yaml not found at: {}", nfs_file_path.display()));
+        }
+        
+        println!("  Reading nfs.yaml from: {}", nfs_file_path.display());
+        let nfs_content = fs::read_to_string(&nfs_file_path)?;
+        let config = serde_yaml::from_str::<NfsConfig>(&nfs_content)?;
+        println!("  NFS config: {:?}", config);
+        
+        Ok(config)
     }
 
     async fn process_volumes_config(&self, repo_path: &str) -> Result<Option<Vec<VolumeDefinition>>> {
