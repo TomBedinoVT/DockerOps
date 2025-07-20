@@ -32,6 +32,25 @@ pub struct StackDefinition {
     pub name: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VolumeDefinition {
+    pub id: String,
+    pub r#type: VolumeType,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VolumeType {
+    Volume,
+    Binding,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NfsConfig {
+    pub path: String,
+}
+
 impl Image {
     pub fn new(name: String, reference_count: i32) -> Self {
         Self {

@@ -5,7 +5,7 @@ use std::process::Command;
 use serde_yaml::Value;
 
 use crate::database::Database;
-use crate::models::{Image, Stack, StackDefinition};
+use crate::models::{Image, Stack, StackDefinition, VolumeDefinition, VolumeType, NfsConfig};
 
 pub struct Commands {
     db: Database,
@@ -181,6 +181,9 @@ impl Commands {
         let stacks_content = fs::read_to_string(&stacks_file_path)?;
         let stacks_definitions: Vec<StackDefinition> = serde_yaml::from_str(&stacks_content)?;
         
+        // Process volumes configuration
+        let volumes_definitions = self.process_volumes_config(repo_path).await?;
+        
         println!("Found {} stack definitions:", stacks_definitions.len());
         
         for stack_def in &stacks_definitions {
@@ -215,7 +218,13 @@ impl Commands {
             }
             
             let compose_path = compose_file_path.unwrap();
-            let compose_content = fs::read_to_string(&compose_path)?;
+            let mut compose_content = fs::read_to_string(&compose_path)?;
+            
+            // Process volumes in compose file if volumes definitions exist
+            if let Some(ref volumes_defs) = volumes_definitions {
+                compose_content = self.process_compose_volumes(&compose_content, volumes_defs).await?;
+            }
+            
             let compose_hash = self.calculate_md5(&compose_content);
             
             // Calculate relative path for database
@@ -548,6 +557,212 @@ impl Commands {
             let error = String::from_utf8_lossy(&output.stderr);
             println!("    Error pulling image {}: {}", image_name, error);
             return Err(anyhow::anyhow!("Failed to pull image: {}", error));
+        }
+        
+        Ok(())
+    }
+
+    async fn process_volumes_config(&self, repo_path: &str) -> Result<Option<Vec<VolumeDefinition>>> {
+        println!("Processing volumes configuration...");
+        
+        // Look for volumes.yaml file
+        let volumes_file_path = Path::new(repo_path).join("volumes.yaml");
+        if !volumes_file_path.exists() {
+            println!("No volumes.yaml found, skipping volume processing");
+            return Ok(None);
+        }
+        
+        // Read and parse volumes.yaml
+        let volumes_content = fs::read_to_string(&volumes_file_path)?;
+        let volumes_definitions: Vec<VolumeDefinition> = serde_yaml::from_str(&volumes_content)?;
+        
+        // Look for nfs.yaml file
+        let nfs_file_path = Path::new(repo_path).join("nfs.yaml");
+        let nfs_config = if nfs_file_path.exists() {
+            let nfs_content = fs::read_to_string(&nfs_file_path)?;
+            Some(serde_yaml::from_str::<NfsConfig>(&nfs_content)?)
+        } else {
+            None
+        };
+        
+        println!("Found {} volume definitions", volumes_definitions.len());
+        
+        let mut volumes_definitions = volumes_definitions;
+        
+        for volume_def in &mut volumes_definitions {
+            match volume_def.r#type {
+                VolumeType::Volume => {
+                    println!("  Processing volume: {} (type: volume, path: {})", 
+                        volume_def.id, volume_def.path);
+                    // For Docker volumes, we just need to ensure they exist
+                    self.ensure_docker_volume_exists(&volume_def.path).await?;
+                }
+                VolumeType::Binding => {
+                    println!("  Processing binding: {} (type: binding, path: {})", 
+                        volume_def.id, volume_def.path);
+                    if let Some(nfs_config) = &nfs_config {
+                        self.process_binding_volume(volume_def, nfs_config, repo_path).await?;
+                    } else {
+                        println!("    Warning: No NFS configuration found, skipping binding volume");
+                    }
+                }
+            }
+        }
+        
+        Ok(Some(volumes_definitions))
+    }
+
+    async fn ensure_docker_volume_exists(&self, volume_name: &str) -> Result<()> {
+        let output = Command::new("docker")
+            .args(&["volume", "ls", "-q", "-f", &format!("name=^{}$", volume_name)])
+            .output()?;
+        
+        let volume_exists = !String::from_utf8_lossy(&output.stdout).trim().is_empty();
+        
+        if !volume_exists {
+            println!("    Creating Docker volume: {}", volume_name);
+            let create_output = Command::new("docker")
+                .args(&["volume", "create", volume_name])
+                .output()?;
+            
+            if create_output.status.success() {
+                println!("    Successfully created Docker volume: {}", volume_name);
+            } else {
+                let error = String::from_utf8_lossy(&create_output.stderr);
+                return Err(anyhow::anyhow!("Failed to create Docker volume {}: {}", volume_name, error));
+            }
+        } else {
+            println!("    Docker volume already exists: {}", volume_name);
+        }
+        
+        Ok(())
+    }
+
+    async fn process_binding_volume(&self, volume_def: &mut VolumeDefinition, nfs_config: &NfsConfig, repo_path: &str) -> Result<()> {
+        let local_path = Path::new(repo_path).join(&volume_def.path);
+        
+        if !local_path.exists() {
+            println!("    Warning: Local path does not exist: {}", local_path.display());
+            return Ok(());
+        }
+        
+        // Create NFS destination path
+        let nfs_dest_path = Path::new(&nfs_config.path).join(&volume_def.id);
+        
+        println!("    Copying {} to NFS: {}", local_path.display(), nfs_dest_path.display());
+        
+        // Remove existing directory on NFS if it exists
+        if nfs_dest_path.exists() {
+            println!("    Removing existing directory on NFS: {}", nfs_dest_path.display());
+            fs::remove_dir_all(&nfs_dest_path)?;
+        }
+        
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = nfs_dest_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        
+        // Copy recursively
+        if local_path.is_dir() {
+            self.copy_directory_recursive(&local_path, &nfs_dest_path).await?;
+        } else {
+            // For files, copy to parent directory
+            if let Some(parent) = nfs_dest_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&local_path, &nfs_dest_path)?;
+        }
+        
+        // Update the volume definition path to point to NFS
+        volume_def.path = nfs_dest_path.to_string_lossy().to_string();
+        
+        println!("    Successfully copied to NFS: {}", nfs_dest_path.display());
+        
+        Ok(())
+    }
+
+    async fn copy_directory_recursive(&self, src: &Path, dst: &Path) -> Result<()> {
+        if !src.is_dir() {
+            return Err(anyhow::anyhow!("Source is not a directory: {}", src.display()));
+        }
+        
+        fs::create_dir_all(dst)?;
+        
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            
+            if file_type.is_dir() {
+                // Use Box::pin for recursive async call
+                Box::pin(self.copy_directory_recursive(&src_path, &dst_path)).await?;
+            } else {
+                fs::copy(&src_path, &dst_path)?;
+            }
+        }
+        
+        Ok(())
+    }
+
+    async fn process_compose_volumes(&self, compose_content: &str, volumes_definitions: &[VolumeDefinition]) -> Result<String> {
+        // Parse the compose content to find volume references
+        let mut yaml_value: serde_yaml::Value = serde_yaml::from_str(compose_content)?;
+        
+        // Process services section
+        if let Some(services) = yaml_value.get_mut("services") {
+            if let Some(services_mapping) = services.as_mapping_mut() {
+                for (_, service) in services_mapping {
+                    if let Some(volumes) = service.get_mut("volumes") {
+                        self.process_service_volumes(volumes, volumes_definitions).await?;
+                    }
+                }
+            }
+        }
+        
+        // Convert back to string
+        let modified_content = serde_yaml::to_string(&yaml_value)?;
+        Ok(modified_content)
+    }
+
+    async fn process_service_volumes(&self, volumes: &mut serde_yaml::Value, volumes_definitions: &[VolumeDefinition]) -> Result<()> {
+        match volumes {
+            serde_yaml::Value::Sequence(seq) => {
+                for volume in seq {
+                    if let Some(volume_str) = volume.as_str() {
+                        // Check if this is a volume reference (format: volume_id:container_path)
+                        if volume_str.contains(':') {
+                            let parts: Vec<&str> = volume_str.split(':').collect();
+                            if parts.len() == 2 {
+                                let volume_id = parts[0];
+                                let container_path = parts[1];
+                                
+                                // Find the volume definition
+                                if let Some(volume_def) = volumes_definitions.iter().find(|v| v.id == volume_id) {
+                                    match volume_def.r#type {
+                                        VolumeType::Volume => {
+                                            // For Docker volumes, use the path as volume name
+                                            let volume_path = format!("{}:{}", volume_def.path, container_path);
+                                            *volume = serde_yaml::Value::String(volume_path);
+                                        }
+                                        VolumeType::Binding => {
+                                            // For bindings, replace with NFS path
+                                            // The path in volume_def.path is the NFS path after processing
+                                            let nfs_path = format!("{}:{}", volume_def.path, container_path);
+                                            *volume = serde_yaml::Value::String(nfs_path);
+                                        }
+                                    }
+                                } else {
+                                    println!("    Warning: Volume definition not found for ID: {}", volume_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Handle other volume formats if needed
+            }
         }
         
         Ok(())

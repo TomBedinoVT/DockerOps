@@ -1,0 +1,22 @@
+# volumes.yaml - Configuration des volumes pour DockerOps
+# Ce fichier définit les volumes utilisés par les stacks
+
+- id: "app_data"
+  type: "volume"
+  path: "app_data_volume"
+
+- id: "config_files"
+  type: "binding"
+  path: "config"
+
+- id: "logs"
+  type: "binding"
+  path: "logs"
+
+- id: "database_data"
+  type: "volume"
+  path: "postgres_data"
+
+- id: "static_files"
+  type: "binding"
+  path: "static" 
