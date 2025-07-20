@@ -348,7 +348,7 @@ class DockerOpsManager:
             sys.exit(1)
         
         # Check if downloaded file is already the binary or needs extraction
-        if download_path.name == BINARY_NAME:
+        if download_path.name.startswith(BINARY_NAME):
             # Direct binary download, no extraction needed
             print(f"📦 Downloaded file is already the binary: {download_path}")
             binary_found = download_path
@@ -361,7 +361,7 @@ class DockerOpsManager:
             # Find the binary in extracted files
             binary_found = None
             for file_path in self.temp_dir.rglob("*"):
-                if file_path.is_file() and file_path.name == BINARY_NAME:
+                if file_path.is_file() and file_path.name.startswith(BINARY_NAME):
                     binary_found = file_path
                     break
             
