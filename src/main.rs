@@ -21,7 +21,11 @@ enum Commands {
         url: String,
     },
     /// Reconcile the database and show current state
-    Reconcile,
+    Reconcile {
+        /// Force reconciliation even if no changes detected
+        #[arg(long)]
+        force: bool,
+    },
     /// Stop the application
     Stop,
     /// Show version information
@@ -73,10 +77,10 @@ async fn main() -> Result<()> {
             let commands = commands::Commands::new(db);
             commands.watch(url).await?;
         }
-        Commands::Reconcile => {
+        Commands::Reconcile { force } => {
             let db = database::Database::new(&database_url).await?;
             let commands = commands::Commands::new(db);
-            commands.reconcile().await?;
+            commands.reconcile(*force).await?;
         }
         Commands::Stop => {
             let db = database::Database::new(&database_url).await?;

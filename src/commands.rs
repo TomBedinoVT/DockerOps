@@ -30,7 +30,7 @@ impl Commands {
         println!("Repository cloned to: {}", repo_path);
         
         // Process stacks and deploy them
-        self.process_and_deploy_stacks(&repo_path, github_url, false).await?;
+        self.process_and_deploy_stacks(&repo_path, github_url, false, false).await?;
         
         // Add repository to cache
         self.db.add_repository_to_cache(github_url).await?;
@@ -44,7 +44,7 @@ impl Commands {
         Ok(())
     }
 
-    pub async fn reconcile(&self) -> Result<()> {
+    pub async fn reconcile(&self, force: bool) -> Result<()> {
         println!("Reconciling database...");
         
         // Check if there are any repositories in cache
@@ -76,6 +76,9 @@ impl Commands {
         
         // Now reconcile each repository
         println!("\nStarting reconciliation process...");
+        if force {
+            println!("⚠️  Force mode enabled - will redeploy all stacks regardless of changes");
+        }
         for repo in &repositories {
             println!("Reconciling repository: {}", repo.url);
             
@@ -83,8 +86,8 @@ impl Commands {
             let repo_path = self.clone_repository(&repo.url).await?;
             println!("Repository cloned to: {}", repo_path);
             
-            // Process stacks and deploy them (with is_reconcile=true)
-            self.process_and_deploy_stacks(&repo_path, &repo.url, true).await?;
+            // Process stacks and deploy them (with is_reconcile=true and force flag)
+            self.process_and_deploy_stacks(&repo_path, &repo.url, true, force).await?;
             
             // Clean up cloned repository
             if let Err(e) = fs::remove_dir_all(&repo_path) {
@@ -214,7 +217,7 @@ impl Commands {
         Ok(temp_dir)
     }
 
-    async fn process_and_deploy_stacks(&self, repo_path: &str, repository_url: &str, is_reconcile: bool) -> Result<()> {
+    async fn process_and_deploy_stacks(&self, repo_path: &str, repository_url: &str, is_reconcile: bool, force: bool) -> Result<()> {
         println!("Processing stacks from repository...");
         
         // Reset image reference counts at the beginning
@@ -298,10 +301,19 @@ impl Commands {
             
             // Check if stack exists in database
             if let Some(existing_stack) = self.db.get_stack_by_name(&stack_def.name, repository_url).await? {
-                if existing_stack.hash != compose_hash {
+                let has_changed = existing_stack.hash != compose_hash;
+                let should_deploy = has_changed || force;
+                
+                if has_changed {
                     println!("  Stack '{}' has changed (hash: {} -> {})", 
                         stack_def.name, existing_stack.hash, compose_hash);
-                    
+                } else if force {
+                    println!("  Stack '{}' unchanged but force mode enabled, redeploying", stack_def.name);
+                } else {
+                    println!("  Stack '{}' unchanged", stack_def.name);
+                }
+                
+                if should_deploy {
                     if is_reconcile {
                         // For reconcile, stop the existing stack first
                         println!("  Stopping existing stack '{}'", stack_def.name);
@@ -315,8 +327,6 @@ impl Commands {
                     println!("  Deploying updated stack '{}'", stack_def.name);
                     self.deploy_stack(&stack_def.name, &compose_path, &secrets_env_vars).await?;
                     self.db.update_stack_status(&stack_def.name, repository_url, "deployed").await?;
-                } else {
-                    println!("  Stack '{}' unchanged", stack_def.name);
                 }
             } else {
                 // New stack
